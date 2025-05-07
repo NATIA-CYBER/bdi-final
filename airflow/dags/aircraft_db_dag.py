@@ -32,12 +32,9 @@ default_args = {
 
 def download_aircraft_db(**context):
     """Download aircraft database and store in S3 raw layer."""
-    url = "http://downloads.adsbexchange.com/downloads/basic-ac-db.json.gz"
+    url = "https://s3.opensky-network.org/data-samples/metadata/aircraftDatabase.json"
     response = requests.get(url)
-    
-    # Decompress gzip data
-    with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as gz:
-        data = json.loads(gz.read().decode('utf-8'))
+    data = response.json()
     
     # Store in S3 raw layer with timestamp
     s3 = boto3.client('s3')
