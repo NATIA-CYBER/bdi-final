@@ -1,15 +1,15 @@
+import json
+import os
+from datetime import datetime, timedelta
+
+import boto3
+import psycopg2
+import requests
+from dotenv import load_dotenv
+from psycopg2.extras import execute_batch
+
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
-import requests
-import boto3
-import gzip
-import json
-import io
-import os
-from dotenv import load_dotenv
-import psycopg2
-from psycopg2.extras import execute_batch
 
 # Load environment variables
 load_dotenv()
@@ -118,7 +118,10 @@ def load_to_postgres(**context):
     
     # Prepare data for upsert
     insert_query = """
-        INSERT INTO aircraft (icao, registration, manufacturer, model, type_code, last_updated, source)
+        INSERT INTO aircraft (
+            icao, registration, manufacturer, model,
+            type_code, last_updated, source
+        )
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (icao) 
         DO UPDATE SET

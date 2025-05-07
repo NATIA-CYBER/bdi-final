@@ -1,9 +1,11 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from bdi_api.s8.exercise import router as s8_router
+import os
+
 import uvicorn
 from dotenv import load_dotenv
-import os
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+from bdi_api.s8.exercise import router as s8_router
 
 # Load environment variables
 load_dotenv()

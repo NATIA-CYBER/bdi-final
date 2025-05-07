@@ -1,11 +1,13 @@
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
-import requests
-import boto3
 import json
 import os
+from datetime import datetime, timedelta
+
+import boto3
+import requests
 from dotenv import load_dotenv
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
 
 # Load environment variables
 load_dotenv()

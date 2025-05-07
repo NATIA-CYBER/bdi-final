@@ -1,12 +1,7 @@
-from unittest.mock import MagicMock, patch
-from fastapi.testclient import TestClient
-from bdi_api.s8.exercise import router, get_db_connection, s3_client
-from fastapi import FastAPI
-import pandas as pd
-import json
-
 from bdi_api.app import app
-from bdi_api.s8.exercise import Aircraft, CO2Emission
+from bdi_api.s8.exercise import get_db_connection, s3_client
+from fastapi.testclient import TestClient
+from unittest.mock import MagicMock
 
 client = TestClient(app)
 
@@ -128,3 +123,4 @@ async def test_get_aircraft_co2_not_found():
     """Test getting CO2 emissions for non-existent aircraft"""
     response = client.get("/aircraft/NONEXISTENT/co2")
     assert response.status_code == 404
+

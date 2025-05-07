@@ -1,14 +1,11 @@
-import io
-import json
 import os
 from datetime import datetime
 from typing import List, Optional
 
 import boto3
-import pandas as pd
 import psycopg2
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field
@@ -95,7 +92,10 @@ async def get_aircraft(icao: str, conn = Depends(get_db_connection)):
             """, (icao,))
             result = cur.fetchone()
             if not result:
-                return JSONResponse(status_code=404, content={"detail": "Aircraft not found"})
+                return JSONResponse(
+                    status_code=404,
+                    content={"detail": "Aircraft not found"}
+                )
             return Aircraft(**result)
     except Exception as e:
         return JSONResponse(
@@ -119,8 +119,11 @@ async def get_aircraft_co2(icao: str, conn = Depends(get_db_connection)):
             """, (icao,))
             aircraft_result = cur.fetchone()
             if not aircraft_result:
-                return JSONResponse(status_code=404, content={"detail": "Aircraft not found"})
-            aircraft_type = aircraft_result['type_code']
+                return JSONResponse(
+                    status_code=404,
+                    content={"detail": "Aircraft not found"}
+                )
+            _ = aircraft_result['type_code']  # Verify type_code exists
         
         # For testing purposes, return mock data
         return CO2Emission(

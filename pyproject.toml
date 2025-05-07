@@ -1,3 +1,16 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bdi-final-assignment"
+version = "0.1.0"
+description = "BDI Final Assignment"
+requires-python = ">=3.9"
+
+[tool.setuptools]
+packages = ["bdi_api", "bdi_api.s8"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py39"
@@ -16,3 +29,10 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = [
+    "."
+]
