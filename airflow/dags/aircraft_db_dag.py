@@ -176,4 +176,4 @@ with DAG(
         python_callable=load_to_postgres,
     )
 
-    download_task > process_task > load_task
+    download_task >> process_task >> load_task
