@@ -32,7 +32,7 @@ MAX_FILES = 100  # Maximum number of files to process per execution
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'start_date': datetime.now() - timedelta(days=30),
+    'start_date': datetime(2023, 11, 1),
     'end_date': datetime(2024, 11, 1),
     'email_on_failure': False,
     'email_on_retry': False,
