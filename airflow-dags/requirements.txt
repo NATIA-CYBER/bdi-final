@@ -1,0 +1,6 @@
+astro-sdk-python
+pandas
+boto3
+psycopg2-binary
+python-dotenv
+requests
