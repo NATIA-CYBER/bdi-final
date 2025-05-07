@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Airflow
+airflow.cfg
+airflow.db
+airflow-webserver.pid
+logs/
+unittests.cfg
+airflow_login.py
+webserver_config.py
+
+# Astronomer
+.astro/
+include/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# AWS
+.aws/
+
+# Environment
+.env
+.venv
+venv/
+ENV/
+
+# Data
+*.csv
+*.json
+*.gz
