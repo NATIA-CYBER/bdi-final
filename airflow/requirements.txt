@@ -1,5 +1,9 @@
-apache-airflow-providers-amazon>=2.0.0
-astro-sdk-python>=1.0.0
-boto3>=1.26.0
-requests>=2.28.0
-python-dotenv>=0.21.0
+# Astro Runtime includes the following pre-installed providers packages: https://www.astronomer.io/docs/astro/runtime-image-architecture#provider-packages
+astro-sdk-python
+pandas
+boto3
+psycopg2-binary
+python-dotenv
+requests
+
+astro-run-dag # This package is needed for the astro run command. It will be removed before a deploy

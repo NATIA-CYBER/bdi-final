@@ -91,4 +91,4 @@ with DAG(
         python_callable=process_fuel_data,
     )
 
-    download_task >> process_task
+    download_task > process_task

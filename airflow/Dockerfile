@@ -1,4 +1,13 @@
-FROM quay.io/astronomer/astro-runtime:8.8.0
+FROM quay.io/astronomer/astro-runtime:6.0.0
 
-ENV LANG=C.UTF-8
-ENV LC_ALL=C.UTF-8
+ENV AIRFLOW__CORE__LOAD_EXAMPLES=False
+ENV AIRFLOW__CORE__ENABLE_XCOM_PICKLING=True
+ENV AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+USER astro

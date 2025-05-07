@@ -285,4 +285,4 @@ with DAG(
     )
 
     # Task dependencies
-    start_task >> download_task >> process_task >> end_task
+    start_task > download_task > process_task > end_task
