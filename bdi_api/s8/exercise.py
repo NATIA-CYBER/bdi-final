@@ -69,10 +69,9 @@ async def get_aircrafts(conn=Depends(get_db_connection)):
                 ORDER BY last_updated DESC
             """)
             results = cur.fetchall()
-            
             return [Aircraft(**result) for result in results]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") from e
 
 @router.get("/aircraft/{icao}", response_model=Aircraft)
 async def get_aircraft(icao: str, conn=Depends(get_db_connection)):
@@ -87,15 +86,13 @@ async def get_aircraft(icao: str, conn=Depends(get_db_connection)):
                 WHERE icao = %s
             """, (icao,))
             result = cur.fetchone()
-            
             if not result:
                 raise HTTPException(status_code=404, detail="Aircraft not found")
-            
             return Aircraft(**result)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}") from e
 
 @router.get("/aircraft/{icao}/co2", response_model=CO2Emission)
 async def get_aircraft_co2(icao: str, conn=Depends(get_db_connection)):
@@ -112,10 +109,8 @@ async def get_aircraft_co2(icao: str, conn=Depends(get_db_connection)):
                 WHERE icao = %s
             """, (icao,))
             aircraft_result = cur.fetchone()
-            
             if not aircraft_result:
                 raise HTTPException(status_code=404, detail="Aircraft not found")
-            
             aircraft_type = aircraft_result['type_code']
         
         # Get latest fuel consumption rates
@@ -126,7 +121,10 @@ async def get_aircraft_co2(icao: str, conn=Depends(get_db_connection)):
             )
             fuel_data = json.loads(response['Body'].read().decode('utf-8'))
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error accessing fuel consumption data: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error accessing fuel consumption data: {str(e)}"
+            ) from e
         
         # Get flight tracking data for the aircraft
         try:
@@ -167,9 +165,15 @@ async def get_aircraft_co2(icao: str, conn=Depends(get_db_connection)):
             )
             
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error processing tracking data: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error processing tracking data: {str(e)}"
+            ) from e
             
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Server error: {str(e)}"
+        ) from e
