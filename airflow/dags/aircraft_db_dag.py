@@ -286,7 +286,7 @@ with DAG(
     'aircraft_database',
     default_args=default_args,
     description='Download and process aircraft database with idempotency',
-    schedule='@daily',
+    schedule='0 0 * * *',  # Run at midnight every day
     catchup=True,  # Enable catchup for backfilling
     tags=['aircraft', 'database']
 ) as dag:
