@@ -102,7 +102,7 @@ with DAG(
     'fuel_consumption',
     default_args=default_args,
     description='Download and process aircraft fuel consumption rates',
-    schedule_interval='@daily',
+    schedule='@daily',
     catchup=False,
     tags=['aircraft', 'fuel']
 ) as dag:
