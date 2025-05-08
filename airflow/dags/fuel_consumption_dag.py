@@ -3,8 +3,10 @@ import os
 from datetime import datetime, timedelta
 
 import boto3
+import psycopg2
 import requests
 from dotenv import load_dotenv
+from psycopg2.extras import execute_batch
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -25,10 +27,13 @@ default_args = {
 }
 
 def download_fuel_data(**context):
-    """Download aircraft fuel consumption rates."""
-    url = "https://raw.githubusercontent.com/junzis/aircraft-emissions/master/data/fuel_consumption.csv"
+    """Download aircraft fuel consumption rates from GitHub."""
+    url = "https://raw.githubusercontent.com/martsec/flight_co2_analysis/main/data/aircraft_type_fuel_consumption_rates.json"
     response = requests.get(url)
-    data = response.text
+    if response.status_code != 200:
+        raise Exception(f"Failed to download fuel consumption data: {response.status_code}")
+    
+    data = response.json()
     
     # Store in S3
     s3 = boto3.client('s3')
@@ -36,45 +41,62 @@ def download_fuel_data(**context):
     
     s3.put_object(
         Bucket=AWS_BUCKET,
-        Key=f'raw/fuel_consumption/{timestamp}/data.csv',
-        Body=data,
-        ContentType='text/csv'
-    )
-    
-    return f's3://{AWS_BUCKET}/raw/fuel_consumption/{timestamp}/data.csv'
-
-def process_fuel_data(**context):
-    """Process fuel consumption data."""
-    s3 = boto3.client('s3')
-    timestamp = context['execution_date'].strftime('%Y/%m/%d')
-    raw_key = f'raw/fuel_consumption/{timestamp}/data.csv'
-    
-    # Get raw data
-    response = s3.get_object(Bucket=AWS_BUCKET, Key=raw_key)
-    data = response['Body'].read().decode('utf-8')
-    
-    # Process data (simple example - convert to JSON)
-    lines = data.strip().split('\n')
-    headers = lines[0].split(',')
-    processed_data = []
-    
-    for line in lines[1:]:
-        values = line.split(',')
-        if len(values) == len(headers):
-            record = dict(zip(headers, values))
-            record['processed_at'] = datetime.now().isoformat()
-            processed_data.append(record)
-    
-    # Store processed data
-    prepared_key = f'prepared/fuel_consumption/{timestamp}/data.json'
-    s3.put_object(
-        Bucket=AWS_BUCKET,
-        Key=prepared_key,
-        Body=json.dumps(processed_data),
+        Key=f'raw/fuel_consumption/{timestamp}/data.json',
+        Body=json.dumps(data),
         ContentType='application/json'
     )
     
-    return f's3://{AWS_BUCKET}/{prepared_key}'
+    context['task_instance'].xcom_push(key='raw_data', value=data)
+    return 'success'
+
+def process_fuel_data(**context):
+    """Process fuel consumption data and load to PostgreSQL."""
+    data = context['task_instance'].xcom_pull(key='raw_data', task_ids='download_fuel_data')
+    
+    # Connect to PostgreSQL
+    conn = psycopg2.connect(
+        host='postgres',  # Using Docker service name
+        database='airflow',
+        user='airflow',
+        password='airflow'
+    )
+    cur = conn.cursor()
+    
+    # Create table if not exists
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS fuel_consumption (
+            aircraft_type VARCHAR(255) PRIMARY KEY,
+            fuel_rate DECIMAL(10,2),
+            last_updated TIMESTAMP WITH TIME ZONE
+        )
+    """)
+    
+    # Prepare data for upsert
+    insert_query = """
+        INSERT INTO fuel_consumption (aircraft_type, fuel_rate, last_updated)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (aircraft_type) 
+        DO UPDATE SET
+            fuel_rate = EXCLUDED.fuel_rate,
+            last_updated = EXCLUDED.last_updated
+    """
+    
+    # Convert data to tuples for batch insert
+    records = [(
+        aircraft_type,
+        float(fuel_rate),
+        datetime.now()
+    ) for aircraft_type, fuel_rate in data.items()]
+    
+    # Execute batch upsert
+    execute_batch(cur, insert_query, records, page_size=1000)
+    
+    # Commit and close
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return 'success'
 
 with DAG(
     'fuel_consumption',

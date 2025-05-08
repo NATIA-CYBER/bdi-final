@@ -296,5 +296,19 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  fastapi:
+    build:
+      context: .
+      dockerfile: bdi_api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=postgres
+      - DB_NAME=airflow
+      - DB_USER=airflow
+      - DB_PASSWORD=airflow
+    depends_on:
+      - postgres
+
 volumes:
   postgres-db-volume:

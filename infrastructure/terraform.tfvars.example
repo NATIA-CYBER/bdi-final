@@ -1,0 +1,5 @@
+aws_region  = "us-east-1"
+bucket_name = "aircraft-data-lake"
+db_name     = "aircraft_db"
+db_username = "admin"
+db_password = "your-secure-password"

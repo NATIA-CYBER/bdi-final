@@ -1,7 +1,9 @@
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 import boto3
 import psycopg2
@@ -10,7 +12,52 @@ from dotenv import load_dotenv
 from psycopg2.extras import execute_batch
 
 from airflow import DAG
+from airflow.exceptions import AirflowException
 from airflow.operators.python import PythonOperator
+
+# Data validation functions
+def validate_icao(icao: str) -> bool:
+    """Validate ICAO address format."""
+    return bool(re.match(r'^[A-F0-9]{6}$', icao.upper()))
+
+def validate_registration(reg: str) -> bool:
+    """Validate aircraft registration format."""
+    return bool(re.match(r'^[A-Z0-9-]+$', reg.upper()))
+
+def validate_aircraft_data(aircraft: Dict) -> Optional[Dict]:
+    """Validate and clean aircraft data."""
+    if not aircraft.get('icao'):
+        return None
+        
+    icao = aircraft['icao'].strip().upper()
+    if not validate_icao(icao):
+        return None
+        
+    registration = aircraft.get('r', '').strip().upper()
+    if registration and not validate_registration(registration):
+        registration = ''
+        
+    type_code = aircraft.get('type', '').strip().upper()
+    if len(type_code) > 10:  # Enforce max length
+        type_code = type_code[:10]
+        
+    manufacturer = aircraft.get('t', '').split(' ')[0] if aircraft.get('t') else ''
+    if len(manufacturer) > 100:  # Enforce max length
+        manufacturer = manufacturer[:100]
+        
+    model = aircraft.get('t', '')
+    if len(model) > 100:  # Enforce max length
+        model = model[:100]
+        
+    return {
+        'icao': icao,
+        'registration': registration,
+        'manufacturer': manufacturer,
+        'model': model,
+        'type_code': type_code,
+        'processed_at': datetime.now().isoformat(),
+        'source': 'adsbexchange'
+    }
 
 # Load environment variables
 load_dotenv()
@@ -46,111 +93,194 @@ def download_aircraft_db(**context):
             import gzip
             import io
             data = []
+            invalid_count = 0
+            total_count = 0
+            
             with io.BytesIO(response.content) as compressed:
                 with gzip.GzipFile(fileobj=compressed) as gzipped:
                     for line in gzipped:
+                        total_count += 1
                         if line.strip():  # Skip empty lines
                             try:
                                 aircraft = json.loads(line)
-                                data.append(aircraft)
+                                if isinstance(aircraft, dict):
+                                    data.append(aircraft)
+                                else:
+                                    invalid_count += 1
                             except json.JSONDecodeError:
-                                continue  # Skip invalid JSON lines
+                                invalid_count += 1
+                                continue
             
             if not data:  # If no valid data was found
-                raise Exception("No valid aircraft data found in the response")
+                raise AirflowException("No valid aircraft data found in the response")
+            
+            # Log data quality metrics
+            context['task_instance'].xcom_push(
+                key='data_quality_metrics',
+                value={
+                    'total_records': total_count,
+                    'valid_records': len(data),
+                    'invalid_records': invalid_count,
+                    'success_rate': (len(data) / total_count * 100) if total_count > 0 else 0
+                }
+            )
             
             context['task_instance'].xcom_push(key='raw_data', value=data)
-            return 'success'
+            return f'Successfully downloaded {len(data)} records'
             
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:  # Last attempt
-                raise Exception(f"Failed to download aircraft data after {max_retries} attempts: {str(e)}")
+                raise AirflowException(f"Failed to download aircraft data after {max_retries} attempts: {str(e)}")
             time.sleep(retry_delay)
         except Exception as e:
-            raise Exception(f"Error processing aircraft data: {str(e)}")
+            raise AirflowException(f"Error processing aircraft data: {str(e)}")
 
 def process_aircraft_db(**context):
     """Transform raw aircraft data and limit to 100 records."""
     data = context['task_instance'].xcom_pull(key='raw_data', task_ids='download_aircraft_db')
+    if not data:
+        raise AirflowException("No raw data available from download task")
     
-    # Process data (normalize and clean)
+    # Process data with validation
     processed_data = []
+    invalid_count = 0
     count = 0
+    
     for aircraft in data:
         if count >= 100:  # Limit to 100 records
             break
             
-        if aircraft.get('icao', '').strip():  # Only process aircraft with valid ICAO
-            processed_aircraft = {
-                'icao': aircraft.get('icao', '').strip().upper(),
-                'registration': aircraft.get('r', '').strip(),  # Registration is under 'r'
-                'manufacturer': aircraft.get('t', '').split(' ')[0] if aircraft.get('t') else '',  # Manufacturer from type
-                'model': aircraft.get('t', ''),  # Full type string as model
-                'type_code': aircraft.get('type', '').strip().upper(),  # Aircraft type code
-                'processed_at': datetime.now().isoformat(),
-                'source': 'adsbexchange'
-            }
-            processed_data.append(processed_aircraft)
+        validated_aircraft = validate_aircraft_data(aircraft)
+        if validated_aircraft:
+            processed_data.append(validated_aircraft)
             count += 1
+        else:
+            invalid_count += 1
+    
+    if not processed_data:
+        raise AirflowException("No valid aircraft data after processing")
+    
+    # Log processing metrics
+    context['task_instance'].xcom_push(
+        key='processing_metrics',
+        value={
+            'processed_records': len(processed_data),
+            'invalid_records': invalid_count,
+            'total_input_records': len(data),
+            'validation_success_rate': (len(processed_data) / len(data) * 100) if data else 0
+        }
+    )
     
     context['task_instance'].xcom_push(key='processed_data', value=processed_data)
-    return 'success'
+    return f'Successfully processed {len(processed_data)} records'
 
 def load_to_postgres(**context):
     """Load processed aircraft data to PostgreSQL with idempotency."""
     data = context['task_instance'].xcom_pull(key='processed_data', task_ids='process_aircraft_db')
+    if not data:
+        raise AirflowException("No processed data available for loading")
     
-    # Connect to PostgreSQL
-    conn = psycopg2.connect(
-        host='postgres',  # Using Docker service name
-        database='airflow',
-        user='airflow',
-        password='airflow'
-    )
-    cur = conn.cursor()
+    conn = None
+    cur = None
+    inserted_count = 0
+    error_count = 0
     
-    # Create table if not exists with composite primary key for historical data
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS aircraft (
-            icao VARCHAR(24),
-            registration VARCHAR(255),
-            manufacturer VARCHAR(255),
-            model VARCHAR(255),
-            type_code VARCHAR(255),
-            recorded_time TIMESTAMP WITH TIME ZONE,
-            source VARCHAR(255),
-            PRIMARY KEY (icao, recorded_time)
+    try:
+        # Connect to PostgreSQL
+        conn = psycopg2.connect(
+            host='postgres',  # Using Docker service name
+            database='airflow',
+            user='airflow',
+            password='airflow'
         )
-    """)
-    
-    # Insert new records (no upsert needed as we're keeping history)
-    insert_query = """
-        INSERT INTO aircraft (
-            icao, registration, manufacturer, model,
-            type_code, recorded_time, source
+        cur = conn.cursor()
+        
+        # Create table if not exists with composite primary key and constraints
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS aircraft (
+                icao VARCHAR(24) NOT NULL CHECK (icao ~ '^[A-F0-9]{6}$'),
+                registration VARCHAR(255) CHECK (registration IS NULL OR registration ~ '^[A-Z0-9-]+$'),
+                manufacturer VARCHAR(255),
+                model VARCHAR(255),
+                type_code VARCHAR(255),
+                recorded_time TIMESTAMP WITH TIME ZONE NOT NULL,
+                source VARCHAR(255) NOT NULL,
+                PRIMARY KEY (icao, recorded_time)
+            )
+        """)
+        
+        # Insert new records (no upsert needed as we're keeping history)
+        insert_query = """
+            INSERT INTO aircraft (
+                icao, registration, manufacturer, model,
+                type_code, recorded_time, source
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        # Convert data to tuples for batch insert with current timestamp
+        current_time = datetime.now()
+        records = []
+        
+        # Validate each record before inserting
+        for aircraft in data:
+            try:
+                if not validate_icao(aircraft['icao']):
+                    error_count += 1
+                    continue
+                    
+                if aircraft['registration'] and not validate_registration(aircraft['registration']):
+                    aircraft['registration'] = None
+                
+                records.append((
+                    aircraft['icao'],
+                    aircraft['registration'],
+                    aircraft['manufacturer'][:100] if aircraft['manufacturer'] else None,
+                    aircraft['model'][:100] if aircraft['model'] else None,
+                    aircraft['type_code'][:10] if aircraft['type_code'] else None,
+                    current_time,
+                    aircraft['source']
+                ))
+            except (KeyError, ValueError) as e:
+                error_count += 1
+                continue
+        
+        if not records:
+            raise AirflowException("No valid records to insert")
+        
+        # Execute batch insert
+        execute_batch(cur, insert_query, records, page_size=1000)
+        inserted_count = len(records)
+        
+        # Commit changes
+        conn.commit()
+        
+        # Log database metrics
+        context['task_instance'].xcom_push(
+            key='database_metrics',
+            value={
+                'inserted_records': inserted_count,
+                'error_records': error_count,
+                'total_records': len(data),
+                'success_rate': (inserted_count / len(data) * 100) if data else 0
+            }
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """
-    
-    # Convert data to tuples for batch insert with current timestamp
-    current_time = datetime.now()
-    records = [(
-        aircraft['icao'],
-        aircraft['registration'],
-        aircraft['manufacturer'],
-        aircraft['model'],
-        aircraft['type_code'],
-        current_time,
-        aircraft['source']
-    ) for aircraft in data]
-    
-    # Execute batch upsert
-    execute_batch(cur, insert_query, records, page_size=1000)
-    
-    # Commit and close
-    conn.commit()
-    cur.close()
-    conn.close()
+        
+        return f'Successfully inserted {inserted_count} records'
+        
+    except psycopg2.Error as e:
+        if conn:
+            conn.rollback()
+        raise AirflowException(f"Database error: {str(e)}")
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise AirflowException(f"Error loading data: {str(e)}")
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 with DAG(
     'aircraft_database',

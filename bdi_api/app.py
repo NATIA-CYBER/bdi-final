@@ -26,7 +26,7 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(s8_router, tags=["aircraft"])
+app.include_router(s8_router, prefix="/api/s8", tags=["aircraft"])
 
 # Health check endpoint
 @app.get("/health")
