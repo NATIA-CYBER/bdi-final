@@ -218,8 +218,8 @@ def load_to_postgres(**context):
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         
-        # Convert data to tuples for batch insert with current timestamp
-        current_time = datetime.now()
+        # Use execution date for historical records
+        execution_date = context.get('execution_date', datetime.now())
         records = []
         
         # Validate each record before inserting
@@ -238,7 +238,7 @@ def load_to_postgres(**context):
                     aircraft['manufacturer'][:100] if aircraft['manufacturer'] else None,
                     aircraft['model'][:100] if aircraft['model'] else None,
                     aircraft['type_code'][:10] if aircraft['type_code'] else None,
-                    current_time,
+                    execution_date,
                     aircraft['source']
                 ))
             except (KeyError, ValueError) as e:
