@@ -32,6 +32,7 @@ class Aircraft(BaseModel):
     type_code: Optional[str] = Field(None, description="Aircraft type code", max_length=10)
     manufacturer: Optional[str] = Field(None, description="Aircraft manufacturer", max_length=100)
     model: Optional[str] = Field(None, description="Aircraft model", max_length=100)
+    recorded_time: datetime = Field(..., description="Time when the data was recorded")
 
     @validator('icao')
     def validate_icao(cls, v):
@@ -90,7 +91,7 @@ async def get_aircrafts():
         # Get latest data for first 100 aircraft
         cur.execute("""
             SELECT DISTINCT ON (icao)
-                icao, registration, manufacturer, model, type_code
+                icao, registration, manufacturer, model, type_code, recorded_time
             FROM aircraft
             WHERE icao IS NOT NULL
               AND icao ~ '^[A-F0-9]{6}$'
@@ -139,7 +140,7 @@ async def get_aircraft(icao: str):
         cur = conn.cursor()
         
         cur.execute("""
-            SELECT icao, registration, manufacturer, model, type_code
+            SELECT icao, registration, manufacturer, model, type_code, recorded_time
             FROM aircraft
             WHERE icao = %s
             ORDER BY recorded_time DESC
