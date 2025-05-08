@@ -6,7 +6,7 @@ from typing import List, Optional
 import boto3
 import psycopg2
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field, validator
@@ -25,25 +25,34 @@ class DataValidationError(Exception):
 
 # Pydantic Models
 class Aircraft(BaseModel):
-    icao: str = Field(..., description="ICAO address of the aircraft", min_length=6, max_length=6)
-    registration: Optional[str] = Field(
-        None, description="Aircraft registration number", max_length=20
-    )
-    type_code: Optional[str] = Field(None, description="Aircraft type code", max_length=10)
-    manufacturer: Optional[str] = Field(None, description="Aircraft manufacturer", max_length=100)
-    model: Optional[str] = Field(None, description="Aircraft model", max_length=100)
-    recorded_time: datetime = Field(..., description="Time when the data was recorded")
+    icao: str
+    registration: Optional[str] = None
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    type_code: Optional[str] = None
+    last_updated: datetime
+    source: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+        json_encoders = {
+            datetime: lambda dt: dt.isoformat() if dt else None
+        }
 
     @validator('icao')
     def validate_icao(cls, v):
-        if not re.match(r'^[A-F0-9]{6}$', v):
-            raise ValueError('ICAO address must be 6 characters long and contain only hexadecimal digits')
-        return v
+        if not v:
+            raise ValueError('ICAO address is required')
+        if not re.match(r'^[A-F0-9]{6}$', v.upper()):
+            raise ValueError('ICAO must be 6 hex characters')
+        return v.upper()
 
     @validator('registration')
     def validate_registration(cls, v):
         if v and not re.match(r'^[A-Z0-9-]+$', v):
-            raise ValueError('Registration must contain only uppercase letters, numbers, and hyphens')
+            raise ValueError(
+                'Registration must contain only uppercase letters, numbers, and hyphens'
+            )
         return v
 
 class FuelConsumption(BaseModel):
@@ -60,63 +69,86 @@ class CO2Emission(BaseModel):
 def get_db_connection():
     try:
         conn = psycopg2.connect(
-            host='localhost',
-            database='airflow',
-            user='airflow',
-            password='airflow',
+            host=os.getenv('POSTGRES_HOST', 'airflow_2061a7-postgres-1'),
+            database=os.getenv('POSTGRES_DB', 'airflow'),
+            user=os.getenv('POSTGRES_USER', 'airflow'),
+            password=os.getenv('POSTGRES_PASSWORD', 'airflow'),
             cursor_factory=RealDictCursor
         )
         return conn
-    except psycopg2.Error as e:
-        raise DatabaseConnectionError(f"Failed to connect to database: {str(e)}")
+    except Exception as e:
+        print(f"🔥 Database connection error: {str(e)}")
+        raise DatabaseConnectionError(f"Database connection failed: {str(e)}")
 
-# S3 client
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-    region_name=os.getenv('AWS_REGION')
-)
+# S3 client initialization function
+def get_s3_client():
+    try:
+        region = os.getenv('AWS_REGION')
+        if not region:
+            region = 'us-east-1'  # Default region
+        return boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=region
+        )
+    except Exception as e:
+        print(f"Warning: S3 client initialization failed: {e}")
+        return None
 
 @router.get("/aircrafts", response_model=List[Aircraft])
-async def get_aircrafts():
-    """
-    Get all aircraft information from the database.
+async def get_aircrafts(skip: int = 0, limit: int = 100):
+    """Get all aircraft information from the database.
     Returns a list of aircraft with their details.
     """
     try:
+        print("Starting get_aircrafts()")
         conn = get_db_connection()
         cur = conn.cursor()
-        
-        # Get latest data for first 100 aircraft
-        cur.execute("""
-            SELECT DISTINCT ON (icao)
-                icao, registration, manufacturer, model, type_code, recorded_time
-            FROM aircraft
-            WHERE icao IS NOT NULL
-              AND icao ~ '^[A-F0-9]{6}$'
-            ORDER BY icao, recorded_time DESC
-            LIMIT 100
-        """)
+        print("Got database connection")
+        print("Database connection info:", conn.get_dsn_parameters())
+
+        query = """
+            WITH latest_records AS (
+                SELECT DISTINCT ON (icao) *
+                FROM aircraft
+                ORDER BY icao, last_updated DESC
+            )
+            SELECT icao, registration, manufacturer, model, type_code, last_updated, source
+            FROM latest_records
+            OFFSET %s LIMIT %s;
+        """
+        cur.execute(query, (skip, min(limit, 100)))
         
         results = cur.fetchall()
+        print(f"Query results: {results}")
         
-        # Validate each aircraft record
-        validated_aircraft = []
-        for aircraft in results:
+        aircraft_list = []
+        for r in results:
             try:
-                validated = Aircraft(**aircraft)
-                validated_aircraft.append(validated)
-            except ValueError as e:
-                # Log invalid data but continue processing
-                print(f"Invalid aircraft data: {aircraft}, Error: {str(e)}")
-        
-        return validated_aircraft
-        
-    except DatabaseConnectionError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+                print(f"Processing row: {r}")
+                aircraft = Aircraft(**r)
+                aircraft_list.append(aircraft)
+            except Exception as e:
+                print(f"Skipping invalid record: {e}")
+
+        response_data = []
+        for aircraft in aircraft_list:
+            try:
+                data = aircraft.dict()
+                print(f"Aircraft data: {data}")
+                response_data.append(data)
+            except Exception as e:
+                print(f"Error converting aircraft to dict: {e}")
+
+        print(f"Final response data: {response_data}")
+        return JSONResponse(content=response_data)
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        print("🔥 Exception in get_aircrafts:", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve aircraft data: {str(e)}")
+
     finally:
         if 'cur' in locals():
             cur.close()
@@ -132,20 +164,23 @@ async def get_aircraft(icao: str):
     if not re.match(r'^[A-F0-9]{6}$', icao.upper()):
         raise HTTPException(
             status_code=400,
-            detail="Invalid ICAO address format. Must be 6 characters long and contain only hexadecimal digits"
+            detail="Invalid ICAO format. Must be 6 hex characters"
         )
     
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         
-        cur.execute("""
-            SELECT icao, registration, manufacturer, model, type_code, recorded_time
-            FROM aircraft
+        cur.execute(
+            """
+            SELECT DISTINCT ON (icao) icao, registration, manufacturer, model, type_code, recorded_time
+            FROM aircraft 
             WHERE icao = %s
-            ORDER BY recorded_time DESC
+            ORDER BY icao, recorded_time DESC
             LIMIT 1
-        """, (icao.upper(),))
+            """,
+            (icao.upper(),)
+        )
         
         result = cur.fetchone()
         
@@ -158,14 +193,20 @@ async def get_aircraft(icao: str):
         try:
             return Aircraft(**result)
         except ValueError as e:
-            raise HTTPException(status_code=422, detail=f"Invalid aircraft data: {str(e)}")
+            raise HTTPException(
+                status_code=422, 
+                detail=f"Invalid aircraft data: {str(e)}"
+            ) from e
             
     except DatabaseConnectionError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        ) from e
     finally:
         if 'cur' in locals():
             cur.close()
@@ -182,24 +223,33 @@ async def get_aircraft_co2(icao: str):
     if not re.match(r'^[A-F0-9]{6}$', icao.upper()):
         raise HTTPException(
             status_code=400,
-            detail="Invalid ICAO address format. Must be 6 characters long and contain only hexadecimal digits"
+            detail="Invalid ICAO format. Must be 6 hex characters"
         )
     
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
+        import traceback
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+        except Exception as e:
+            print(f"Error: {str(e)}\n{traceback.format_exc()}")
+            raise
         
         # Get aircraft type and fuel consumption rate
-        cur.execute("""
+        cur.execute(
+            """
+            WITH latest_aircraft AS (
+                SELECT DISTINCT ON (icao) *
+                FROM aircraft
+                WHERE icao = %s
+                ORDER BY icao, last_updated DESC
+            )
             SELECT a.type_code, f.fuel_rate
-            FROM aircraft a
+            FROM latest_aircraft a
             JOIN fuel_consumption f ON a.type_code = f.aircraft_type
-            WHERE a.icao = %s
-              AND a.type_code IS NOT NULL
-              AND f.fuel_rate > 0
-            ORDER BY a.recorded_time DESC
-            LIMIT 1
-        """, (icao.upper(),))
+            """,
+            (icao.upper(),)
+        )
         
         result = cur.fetchone()
         
@@ -225,7 +275,7 @@ async def get_aircraft_co2(icao: str):
             raise HTTPException(
                 status_code=422,
                 detail=f"Error calculating CO2 emissions: {str(e)}"
-            )
+            ) from e
         
         return CO2Emission(
             total_co2=total_co2,
@@ -233,11 +283,14 @@ async def get_aircraft_co2(icao: str):
         )
         
     except DatabaseConnectionError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        ) from e
     finally:
         if 'cur' in locals():
             cur.close()
