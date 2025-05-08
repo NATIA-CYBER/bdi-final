@@ -57,81 +57,125 @@ s3_client = boto3.client(
     region_name=os.getenv('AWS_REGION')
 )
 
-@router.get("/api/s8/aircrafts", response_model=List[Aircraft])
-async def get_aircrafts(conn = Depends(get_db_connection)):
+@router.get("/aircrafts", response_model=List[Aircraft])
+async def get_aircrafts():
     """
     Get all aircraft information from the database.
     Returns a list of aircraft with their details.
     """
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT icao, registration, type_code, manufacturer, model
-                FROM aircraft
-                ORDER BY last_updated DESC
-            """)
-            results = cur.fetchall()
-            return [Aircraft(**result) for result in results]
+        conn = psycopg2.connect(
+            host='localhost',
+            database='airflow',
+            user='airflow',
+            password='airflow'
+        )
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Get latest data for first 100 aircraft
+        cur.execute("""
+            SELECT DISTINCT ON (icao)
+                icao, registration, manufacturer, model, type_code
+            FROM aircraft
+            ORDER BY icao, recorded_time DESC
+            LIMIT 100
+        """)
+        
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        return [Aircraft(**aircraft) for aircraft in results]
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Database error: {str(e)}"}
+            content={"detail": str(e)}
         )
 
 @router.get("/aircraft/{icao}", response_model=Aircraft)
-async def get_aircraft(icao: str, conn = Depends(get_db_connection)):
+async def get_aircraft(icao: str):
     """
     Get detailed information about a specific aircraft by its ICAO address.
     """
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT icao, registration, type_code, manufacturer, model
-                FROM aircraft
-                WHERE icao = %s
-            """, (icao,))
-            result = cur.fetchone()
-            if not result:
-                return JSONResponse(
-                    status_code=404,
-                    content={"detail": "Aircraft not found"}
-                )
-            return Aircraft(**result)
+        conn = psycopg2.connect(
+            host='localhost',
+            database='airflow',
+            user='airflow',
+            password='airflow'
+        )
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cur.execute("""
+            SELECT icao, registration, manufacturer, model, type_code
+            FROM aircraft
+            WHERE icao = %s
+            ORDER BY recorded_time DESC
+            LIMIT 1
+        """, (icao,))
+        
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not result:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"Aircraft with ICAO {icao} not found"}
+            )
+            
+        return Aircraft(**result)
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Database error: {str(e)}"}
+            content={"detail": str(e)}
         )
 
 @router.get("/aircraft/{icao}/co2", response_model=CO2Emission)
-async def get_aircraft_co2(icao: str, conn = Depends(get_db_connection)):
+async def get_aircraft_co2(icao: str):
     """
     Calculate CO2 emissions for a specific aircraft.
-    Uses tracking data and fuel consumption rates to estimate emissions.
+    Uses fuel consumption rates to estimate emissions.
     """
     try:
-        # Get aircraft type from database
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT type_code
-                FROM aircraft
-                WHERE icao = %s
-            """, (icao,))
-            aircraft_result = cur.fetchone()
-            if not aircraft_result:
-                return JSONResponse(
-                    status_code=404,
-                    content={"detail": "Aircraft not found"}
-                )
-            _ = aircraft_result['type_code']  # Verify type_code exists
+        conn = psycopg2.connect(
+            host='localhost',
+            database='airflow',
+            user='airflow',
+            password='airflow'
+        )
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
-        # For testing purposes, return mock data
+        # Get aircraft type and fuel consumption rate
+        cur.execute("""
+            SELECT a.type_code, f.fuel_rate
+            FROM aircraft a
+            JOIN fuel_consumption f ON a.type_code = f.aircraft_type
+            WHERE a.icao = %s
+            ORDER BY a.recorded_time DESC
+            LIMIT 1
+        """, (icao,))
+        
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not result:
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "Aircraft not found or no fuel consumption data available"}
+            )
+        
+        # Calculate CO2 emissions (fuel rate * CO2 factor)
+        co2_factor = 3.16  # kg CO2 per kg fuel
+        total_co2 = float(result['fuel_rate']) * co2_factor
+        
         return CO2Emission(
-            total_co2=100.0,
+            total_co2=total_co2,
             timestamp=datetime.now().isoformat()
         )
     except Exception as e:
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Error calculating CO2 emissions: {str(e)}"}
+            content={"detail": str(e)}
         )
