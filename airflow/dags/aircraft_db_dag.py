@@ -71,7 +71,7 @@ DB_PASSWORD = os.getenv('DB_PASSWORD')
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'start_date': datetime(2023, 11, 1),
+    'start_date': datetime(2025, 5, 1),  # Start from May 1st
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 1,
@@ -287,7 +287,7 @@ with DAG(
     default_args=default_args,
     description='Download and process aircraft database with idempotency',
     schedule='@daily',
-    catchup=False,
+    catchup=True,  # Enable catchup for backfilling
     tags=['aircraft', 'database']
 ) as dag:
 
