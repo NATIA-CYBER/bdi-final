@@ -29,10 +29,25 @@ All FastAPI endpoint tests have passed successfully. Here are the details:
    - Verifies 404 response
    - Status: ✅ PASSED
 
-## Code Quality
+## Code Quality & Linting
 
-Ruff linting identified some minor issues:
+### Ruff Configuration
+Ruff is configured in `pyproject.toml` with the following settings:
+- Line length: 88 characters
+- Python target: 3.9
+- Active linting rules:
+  - `E`: pycodestyle (PEP 8)
+  - `F`: pyflakes (logical errors)
+  - `I`: isort (import sorting)
+  - `B`: flake8-bugbear (additional checks)
 
+### Ruff Cache
+- Location: `.ruff_cache`
+- Version: 0.11.8
+- Status: Active and running
+
+### Linting Results
+Minor issues identified and addressed:
 1. Import sorting in test files
 2. FastAPI dependency injection patterns (known pattern, acceptable)
 3. Line length in Airflow example tests

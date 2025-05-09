@@ -1,15 +1,9 @@
-"""Test example DAG validation.
+"""Example DAGs test. This test ensures that all Dags have tags, retries set to two, and no import errors. This is an example pytest and may not be fit the context of your DAGs. Feel free to add and remove tests."""
 
-This test ensures that all dags are loadable and have no cycles, and no import errors.
-This is an example pytest and may not be fit the context of your DAGs.
-Feel free to add and remove tests."""
-
-import logging
 import os
+import logging
 from contextlib import contextmanager
-
 import pytest
-
 from airflow.models import DagBag
 
 
@@ -34,8 +28,7 @@ def get_import_errors():
         def strip_path_prefix(path):
             return os.path.relpath(path, os.environ.get("AIRFLOW_HOME"))
 
-        # prepend "(None,None)" to ensure test object creation
-        # even if it's a no op.
+        # prepend "(None,None)" to ensure that a test object is always created even if it's a no op.
         return [(None, None)] + [
             (strip_path_prefix(k), v.strip()) for k, v in dag_bag.import_errors.items()
         ]

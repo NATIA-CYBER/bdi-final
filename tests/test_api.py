@@ -1,7 +1,9 @@
+from unittest.mock import MagicMock
+
+from fastapi.testclient import TestClient
+
 from bdi_api.app import app
 from bdi_api.s8.exercise import get_db_connection, s3_client
-from fastapi.testclient import TestClient
-from unittest.mock import MagicMock
 
 client = TestClient(app)
 

@@ -217,9 +217,9 @@ def load_to_postgres(**context):
                 manufacturer VARCHAR(255),
                 model VARCHAR(255),
                 type_code VARCHAR(255),
-                recorded_time TIMESTAMP WITH TIME ZONE NOT NULL,
+                last_updated TIMESTAMP WITH TIME ZONE NOT NULL,
                 source VARCHAR(255) NOT NULL,
-                PRIMARY KEY (icao, recorded_time)
+                PRIMARY KEY (icao, last_updated)
             )
         """)
         
@@ -227,7 +227,7 @@ def load_to_postgres(**context):
         insert_query = """
             INSERT INTO aircraft (
                 icao, registration, manufacturer, model,
-                type_code, recorded_time, source
+                type_code, last_updated, source
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
@@ -322,4 +322,45 @@ with DAG(
         python_callable=load_to_postgres,
     )
 
-    download_task >> process_task >> load_task
+    def copy_to_fastapi_db(**context):
+        """Copy data to FastAPI's PostgreSQL database"""
+        source_conn = psycopg2.connect(
+            host='postgres',
+            database='airflow',
+            user='airflow',
+            password='airflow'
+        )
+        source_cur = source_conn.cursor()
+        source_cur.execute('SELECT * FROM aircraft')
+        records = source_cur.fetchall()
+        
+        target_conn = psycopg2.connect(
+            host='postgres',
+            database='airflow',
+            user='airflow',
+            password='airflow'
+        )
+        target_cur = target_conn.cursor()
+        target_cur.execute('''CREATE TABLE IF NOT EXISTS aircraft (
+            icao VARCHAR(24) NOT NULL CHECK (icao ~ '^[A-F0-9]{6}$'),
+            registration VARCHAR(255),
+            manufacturer VARCHAR(255),
+            model VARCHAR(255),
+            type_code VARCHAR(255),
+            last_updated TIMESTAMP WITH TIME ZONE NOT NULL,
+            source VARCHAR(255) NOT NULL,
+            PRIMARY KEY (icao, last_updated)
+        )''')
+        
+        execute_batch(target_cur,
+            'INSERT INTO aircraft VALUES (%s, %s, %s, %s, %s, %s, %s)',
+            records
+        )
+        target_conn.commit()
+
+    copy_task = PythonOperator(
+        task_id='copy_to_fastapi_db',
+        python_callable=copy_to_fastapi_db,
+    )
+
+    download_task >> process_task >> load_task >> copy_task

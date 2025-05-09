@@ -69,10 +69,10 @@ class CO2Emission(BaseModel):
 def get_db_connection():
     try:
         conn = psycopg2.connect(
-            host=os.getenv('POSTGRES_HOST', 'airflow_2061a7-postgres-1'),
-            database=os.getenv('POSTGRES_DB', 'airflow'),
-            user=os.getenv('POSTGRES_USER', 'airflow'),
-            password=os.getenv('POSTGRES_PASSWORD', 'airflow'),
+            host=os.getenv('DB_HOST', 'postgres'),
+            database=os.getenv('DB_NAME', 'airflow'),
+            user=os.getenv('DB_USER', 'airflow'),
+            password=os.getenv('DB_PASSWORD', 'airflow'),
             cursor_factory=RealDictCursor
         )
         return conn
@@ -123,26 +123,7 @@ async def get_aircrafts(skip: int = 0, limit: int = 100):
         results = cur.fetchall()
         print(f"Query results: {results}")
         
-        aircraft_list = []
-        for r in results:
-            try:
-                print(f"Processing row: {r}")
-                aircraft = Aircraft(**r)
-                aircraft_list.append(aircraft)
-            except Exception as e:
-                print(f"Skipping invalid record: {e}")
-
-        response_data = []
-        for aircraft in aircraft_list:
-            try:
-                data = aircraft.dict()
-                print(f"Aircraft data: {data}")
-                response_data.append(data)
-            except Exception as e:
-                print(f"Error converting aircraft to dict: {e}")
-
-        print(f"Final response data: {response_data}")
-        return JSONResponse(content=response_data)
+        return [Aircraft(**r) for r in results]
 
     except Exception as e:
         import traceback
@@ -173,10 +154,10 @@ async def get_aircraft(icao: str):
         
         cur.execute(
             """
-            SELECT DISTINCT ON (icao) icao, registration, manufacturer, model, type_code, recorded_time
+            SELECT DISTINCT ON (icao) icao, registration, manufacturer, model, type_code, last_updated
             FROM aircraft 
             WHERE icao = %s
-            ORDER BY icao, recorded_time DESC
+            ORDER BY icao, last_updated DESC
             LIMIT 1
             """,
             (icao.upper(),)
@@ -203,10 +184,11 @@ async def get_aircraft(icao: str):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Database error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        ) from e
+            detail=str(e)
+        )
     finally:
         if 'cur' in locals():
             cur.close()
@@ -242,7 +224,7 @@ async def get_aircraft_co2(icao: str):
                 SELECT DISTINCT ON (icao) *
                 FROM aircraft
                 WHERE icao = %s
-                ORDER BY icao, last_updated DESC
+                ORDER BY icao, recorded_time DESC
             )
             SELECT a.type_code, f.fuel_rate
             FROM latest_aircraft a
@@ -287,10 +269,11 @@ async def get_aircraft_co2(icao: str):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Database error: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        ) from e
+            detail=str(e)
+        )
     finally:
         if 'cur' in locals():
             cur.close()
