@@ -98,15 +98,9 @@ def get_s3_client():
 
 @router.get("/aircrafts", response_model=List[Aircraft])
 async def get_aircrafts(skip: int = 0, limit: int = 100):
-    """Get all aircraft information from the database.
-    Returns a list of aircraft with their details.
-    """
     try:
-        print("Starting get_aircrafts()")
         conn = get_db_connection()
         cur = conn.cursor()
-        print("Got database connection")
-        print("Database connection info:", conn.get_dsn_parameters())
 
         query = """
             WITH latest_records AS (
@@ -121,13 +115,11 @@ async def get_aircrafts(skip: int = 0, limit: int = 100):
         cur.execute(query, (skip, min(limit, 100)))
         
         results = cur.fetchall()
-        print(f"Query results: {results}")
         
         return [Aircraft(**r) for r in results]
 
     except Exception as e:
-        import traceback
-        print("🔥 Exception in get_aircrafts:", traceback.format_exc())
+        print(f"🔥 Exception in get_aircrafts: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve aircraft data: {str(e)}")
 
     finally:
@@ -138,10 +130,6 @@ async def get_aircrafts(skip: int = 0, limit: int = 100):
 
 @router.get("/aircraft/{icao}", response_model=Aircraft)
 async def get_aircraft(icao: str):
-    """
-    Get detailed information about a specific aircraft by its ICAO address.
-    """
-    # Validate ICAO format
     if not re.match(r'^[A-F0-9]{6}$', icao.upper()):
         raise HTTPException(
             status_code=400,

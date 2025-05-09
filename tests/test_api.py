@@ -37,7 +37,7 @@ async def test_get_aircrafts():
             )
         )
     )
-    """Test getting all aircraft information"""
+    # Test getting all aircraft
     response = client.get("/api/s8/aircrafts")
     assert response.status_code == 200
     aircrafts = response.json()
@@ -58,7 +58,7 @@ async def test_get_aircraft():
             )
         )
     )
-    """Test getting specific aircraft information"""
+    # Test getting specific aircraft
     # Test with valid ICAO
     test_icao = "ABC123"
     response = client.get(f"/aircraft/{test_icao}")
@@ -84,7 +84,7 @@ async def test_get_aircraft_co2():
     # Mock S3 client
     mock_s3 = MagicMock()
     app.dependency_overrides[s3_client] = lambda: mock_s3
-    """Test getting CO2 emissions for an aircraft"""
+    # Test getting CO2 emissions
     test_icao = "ABC123"
     response = client.get(f"/aircraft/{test_icao}/co2")
     assert response.status_code == 200
@@ -106,7 +106,7 @@ async def test_get_aircraft_not_found():
             )
         )
     )
-    """Test getting non-existent aircraft"""
+    # Test getting non-existent aircraft
     response = client.get("/aircraft/NONEXISTENT")
     assert response.status_code == 404
 
@@ -122,7 +122,7 @@ async def test_get_aircraft_co2_not_found():
             )
         )
     )
-    """Test getting CO2 emissions for non-existent aircraft"""
+    # Test getting CO2 emissions for non-existent aircraft
     response = client.get("/aircraft/NONEXISTENT/co2")
     assert response.status_code == 404
 

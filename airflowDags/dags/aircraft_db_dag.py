@@ -25,7 +25,7 @@ def validate_registration(reg: str) -> bool:
     return bool(re.match(r'^[A-Z0-9-]+$', reg.upper()))
 
 def validate_aircraft_data(aircraft: Dict) -> Optional[Dict]:
-    """Validate and clean aircraft data."""
+    # Validate and clean aircraft data
     if not aircraft.get('icao'):
         return None
         
@@ -38,15 +38,15 @@ def validate_aircraft_data(aircraft: Dict) -> Optional[Dict]:
         registration = ''
         
     type_code = aircraft.get('type', '').strip().upper()
-    if len(type_code) > 10:  # Enforce max length
+    if len(type_code) > 10:  
         type_code = type_code[:10]
         
     manufacturer = aircraft.get('t', '').split(' ')[0] if aircraft.get('t') else ''
-    if len(manufacturer) > 100:  # Enforce max length
+    if len(manufacturer) > 100:  
         manufacturer = manufacturer[:100]
         
     model = aircraft.get('t', '')
-    if len(model) > 100:  # Enforce max length
+    if len(model) > 100:  
         model = model[:100]
         
     return {
@@ -71,7 +71,7 @@ DB_PASSWORD = os.getenv('DB_PASSWORD')
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'start_date': datetime(2025, 5, 1),  # Start from May 1st
+    'start_date': datetime(2025, 5, 1),  
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 1,
@@ -79,7 +79,7 @@ default_args = {
 }
 
 def download_aircraft_db(**context):
-    """Download aircraft database from ADSB Exchange."""
+    # Process aircraft data from ADSB Exchange
     url = "http://downloads.adsbexchange.com/downloads/basic-ac-db.json.gz"
     max_retries = 3
     retry_delay = 5
